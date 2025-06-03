@@ -1,0 +1,66 @@
+# Healthcare System - DevOps Configuration
+# Environment-specific configurations for CI/CD pipeline
+
+version: "3.8"
+
+services:
+  # Database Testing Service
+  oracle-test-db:
+    image: container-registry.oracle.com/database/express:latest
+    environment:
+      - ORACLE_PWD=TestPassword123!
+      - ORACLE_CHARACTERSET=AL32UTF8
+    ports:
+      - "1521:1521"
+      - "5500:5500"
+    volumes:
+      - oracle-test-data:/opt/oracle/oradata
+      - ./database:/docker-entrypoint-initdb.d
+    networks:
+      - healthcare-network
+
+  # Test Runner Service
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    depends_on:
+      - oracle-test-db
+    environment:
+      - DB_CONNECTION_STRING=oracle-test-db:1521/XE
+      - DB_USERNAME=healthcare_test
+      - DB_PASSWORD=TestPassword123!
+    volumes:
+      - ./scripts:/app/scripts
+      - ./database:/app/database
+      - ./test-results:/app/test-results
+    networks:
+      - healthcare-network
+    command: ["python", "/app/scripts/run-tests.py", "--environment", "test"]
+
+  # APEX Development Environment
+  apex-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.apex
+    ports:
+      - "8080:8080"
+    environment:
+      - APEX_PUBLIC_USER_PWD=DevPassword123!
+      - APEX_TABLESPACE=APEX
+      - APEX_TEMP_TABLESPACE=TEMP
+    depends_on:
+      - oracle-test-db
+    volumes:
+      - ./apex:/app/apex
+      - ./scripts:/app/scripts
+    networks:
+      - healthcare-network
+
+volumes:
+  oracle-test-data:
+    driver: local
+
+networks:
+  healthcare-network:
+    driver: bridge

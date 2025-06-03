@@ -1,0 +1,201 @@
+# Azure DevOps Pipeline for Healthcare System
+# Oracle APEX Application with Clinical Trials Extension
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+      - feature/*
+  paths:
+    include:
+      - database/*
+      - scripts/*
+      - apex/*
+
+variables:
+  - group: healthcare-system-variables
+  - name: buildConfiguration
+    value: "Release"
+
+stages:
+  - stage: Validate
+    displayName: "Code Quality & Validation"
+    jobs:
+      - job: CodeQuality
+        displayName: "Code Quality Check"
+        pool:
+          vmImage: "ubuntu-latest"
+
+        steps:
+          - checkout: self
+
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: "3.x"
+
+          - script: |
+              pip install sqlfluff
+              echo "Linting SQL files..."
+              find database/ -name "*.sql" -exec sqlfluff lint {} \;
+              find scripts/ -name "*.sql" -exec sqlfluff lint {} \;
+            displayName: "SQL Linting"
+
+          - script: |
+              echo "Security scan for sensitive data..."
+              if grep -r -i "password\|secret\|key" database/ scripts/; then
+                echo "##vso[task.logissue type=warning]Found potential sensitive data in SQL files"
+              fi
+            displayName: "Security Scan"
+
+          - task: PublishTestResults@2
+            inputs:
+              testResultsFormat: "JUnit"
+              testResultsFiles: "**/test-results.xml"
+              failTaskOnFailedTests: true
+            condition: always()
+
+  - stage: Build
+    displayName: "Build & Package"
+    dependsOn: Validate
+    condition: succeeded()
+    jobs:
+      - job: BuildPackage
+        displayName: "Create Deployment Package"
+        pool:
+          vmImage: "ubuntu-latest"
+
+        steps:
+          - checkout: self
+
+          - script: |
+              mkdir -p $(Build.ArtifactStagingDirectory)/healthcare-system
+              cp -r database $(Build.ArtifactStagingDirectory)/healthcare-system/
+              cp -r scripts $(Build.ArtifactStagingDirectory)/healthcare-system/
+              cp -r apex $(Build.ArtifactStagingDirectory)/healthcare-system/
+              cp -r docs $(Build.ArtifactStagingDirectory)/healthcare-system/
+
+              # Create deployment manifest
+              cat > $(Build.ArtifactStagingDirectory)/healthcare-system/DEPLOYMENT_INFO.json << EOF
+              {
+                "buildId": "$(Build.BuildId)",
+                "buildNumber": "$(Build.BuildNumber)",
+                "sourceVersion": "$(Build.SourceVersion)",
+                "sourceBranch": "$(Build.SourceBranchName)",
+                "buildDate": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+                "environment": "$(targetEnvironment)"
+              }
+              EOF
+
+              echo "Build package created successfully"
+            displayName: "Create Deployment Package"
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: "$(Build.ArtifactStagingDirectory)/healthcare-system"
+              artifactName: "healthcare-system"
+              publishLocation: "Container"
+
+  - stage: DeployDev
+    displayName: "Deploy to Development"
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+    jobs:
+      - deployment: DeployToDev
+        displayName: "Deploy to Development Environment"
+        environment: "healthcare-dev"
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: healthcare-system
+
+                - task: OracleCloudInfrastructureCLI@1
+                  inputs:
+                    connectionType: "connectedService"
+                    connectedServiceNameSelector: "OCI-Dev"
+                    scriptType: "bash"
+                    scriptPath: "$(Pipeline.Workspace)/healthcare-system/scripts/deploy-database.sh"
+                    arguments: "dev"
+                  displayName: "Deploy Database Schema"
+
+                - script: |
+                    echo "Deploying APEX application to development..."
+                    # APEX deployment commands here
+                    python3 $(Pipeline.Workspace)/healthcare-system/scripts/deploy-apex.py --environment dev
+                  displayName: "Deploy APEX Application"
+
+                - script: |
+                    echo "Running smoke tests..."
+                    python3 $(Pipeline.Workspace)/healthcare-system/scripts/run-tests.py --environment dev --test-type smoke
+                  displayName: "Run Smoke Tests"
+
+  - stage: DeployStaging
+    displayName: "Deploy to Staging"
+    dependsOn: [Build, DeployDev]
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployToStaging
+        displayName: "Deploy to Staging Environment"
+        environment: "healthcare-staging"
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: healthcare-system
+
+                - task: OracleCloudInfrastructureCLI@1
+                  inputs:
+                    connectionType: "connectedService"
+                    connectedServiceNameSelector: "OCI-Staging"
+                    scriptType: "bash"
+                    scriptPath: "$(Pipeline.Workspace)/healthcare-system/scripts/deploy-database.sh"
+                    arguments: "staging"
+                  displayName: "Deploy Database Schema"
+
+                - script: |
+                    echo "Running integration tests..."
+                    python3 $(Pipeline.Workspace)/healthcare-system/scripts/run-tests.py --environment staging --test-type integration
+                  displayName: "Run Integration Tests"
+
+  - stage: DeployProduction
+    displayName: "Deploy to Production"
+    dependsOn: [Build, DeployStaging]
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployToProduction
+        displayName: "Deploy to Production Environment"
+        environment: "healthcare-production"
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: healthcare-system
+
+                - script: |
+                    echo "Creating production backup..."
+                    python3 $(Pipeline.Workspace)/healthcare-system/scripts/backup-production.py
+                  displayName: "Backup Production"
+
+                - task: OracleCloudInfrastructureCLI@1
+                  inputs:
+                    connectionType: "connectedService"
+                    connectedServiceNameSelector: "OCI-Production"
+                    scriptType: "bash"
+                    scriptPath: "$(Pipeline.Workspace)/healthcare-system/scripts/deploy-database.sh"
+                    arguments: "production"
+                  displayName: "Deploy Database Schema"
+
+                - script: |
+                    echo "Running production health checks..."
+                    python3 $(Pipeline.Workspace)/healthcare-system/scripts/health-check.py --environment production
+                  displayName: "Production Health Check"

@@ -1,0 +1,50 @@
+# Staging Environment Configuration
+{
+  "environment": "staging",
+  "apex_url": "https://apex.oracle.com/pls/apex",
+  "workspace": "BASESTATIONFIVE_STAGING",
+  "database": {
+    "connection_string": "${DB_CONNECTION_STRING}",
+    "username": "${DB_USERNAME}",
+    "password": "${DB_PASSWORD}",
+    "schema": "healthcare_staging"
+  },
+  "application": {
+    "name": "Healthcare Management System - Staging",
+    "alias": "HEALTHCARE_STAGING",
+    "description": "Healthcare management system with clinical trials - Staging Environment",
+    "version": "1.0.0-staging",
+    "auth_scheme": "DATABASE_ACCOUNTS",
+    "theme": "UNIVERSAL_THEME"
+  },
+  "security": {
+    "authentication": {
+      "name": "Healthcare DB Auth",
+      "type": "DATABASE_ACCOUNTS",
+      "description": "Database authentication for healthcare users"
+    },
+    "authorization": [
+      {
+        "name": "Healthcare Admin",
+        "type": "SQL_QUERY",
+        "query": "SELECT 1 FROM healthcare_users WHERE username = :APP_USER AND role = 'ADMIN'"
+      },
+      {
+        "name": "Clinical Research",
+        "type": "SQL_QUERY",
+        "query": "SELECT 1 FROM healthcare_users WHERE username = :APP_USER AND role IN ('CLINICAL_RESEARCH', 'ADMIN')"
+      },
+      {
+        "name": "Healthcare Provider",
+        "type": "SQL_QUERY",
+        "query": "SELECT 1 FROM healthcare_users WHERE username = :APP_USER AND role IN ('PROVIDER', 'ADMIN')"
+      }
+    ]
+  },
+  "deployment": {
+    "backup_required": true,
+    "run_tests": true,
+    "notify_team": true,
+    "approval_required": true
+  }
+}

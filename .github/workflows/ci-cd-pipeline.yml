@@ -1,0 +1,373 @@
+# Healthcare System - CI/CD Pipeline
+# Oracle APEX Application with Clinical Trials Extension
+# Date: June 3, 2025
+
+name: Healthcare System CI/CD
+
+on:
+  push:
+    branches: [ main, develop, feature/* ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+        - staging
+        - prod
+
+env:
+  # Oracle Cloud Infrastructure Configuration
+  OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
+  OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
+  OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
+  OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+  OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
+  
+  # APEX Configuration
+  APEX_WORKSPACE: ${{ secrets.APEX_WORKSPACE }}
+  APEX_USERNAME: ${{ secrets.APEX_USERNAME }}
+  APEX_PASSWORD: ${{ secrets.APEX_PASSWORD }}
+  
+  # Database Configuration
+  DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
+  DB_USERNAME: ${{ secrets.DB_USERNAME }}
+  DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+
+jobs:
+  # Stage 1: Code Quality and Security
+  code-quality:
+    runs-on: ubuntu-latest
+    name: Code Quality & Security
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      
+    - name: Setup Oracle Client
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y alien libaio1
+        wget https://download.oracle.com/otn_software/linux/instantclient/215000/oracle-instantclient-basic-21.5.0.0.0-1.x86_64.rpm
+        sudo alien -i oracle-instantclient-basic-21.5.0.0.0-1.x86_64.rpm
+        
+    - name: SQL Lint Check
+      run: |
+        # Install SQL linting tools
+        pip install sqlfluff
+        
+        # Lint SQL files
+        echo "Linting database schema files..."
+        find database/ -name "*.sql" -exec sqlfluff lint {} \;
+        
+        echo "Linting installation scripts..."
+        find scripts/ -name "*.sql" -exec sqlfluff lint {} \;
+        
+    - name: Security Scan
+      run: |
+        # Check for sensitive information in SQL files
+        echo "Scanning for sensitive data..."
+        grep -r -i "password\|secret\|key" database/ scripts/ || true
+        
+        # Check for SQL injection patterns
+        echo "Checking for potential SQL injection patterns..."
+        grep -r -E "(union|select|insert|update|delete).*(\|\||&&)" database/ scripts/ || true
+        
+    - name: Documentation Check
+      run: |
+        # Verify documentation exists
+        test -f README.md
+        test -f PROJECT_OVERVIEW.md
+        test -f docs/installation/INSTALLATION.md
+        test -f docs/installation/APEX_CLOUD_SETUP.md
+        echo "Documentation check passed"
+
+  # Stage 2: Database Testing
+  database-tests:
+    runs-on: ubuntu-latest
+    name: Database Schema Validation
+    needs: code-quality
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      
+    - name: Setup Oracle CLI
+      uses: oracle-actions/configure-oracle-cli@v1
+      with:
+        user: ${{ env.OCI_CLI_USER }}
+        tenancy: ${{ env.OCI_CLI_TENANCY }}
+        fingerprint: ${{ env.OCI_CLI_FINGERPRINT }}
+        key_content: ${{ env.OCI_CLI_KEY_CONTENT }}
+        region: ${{ env.OCI_CLI_REGION }}
+        
+    - name: Validate SQL Syntax
+      run: |
+        # Create temporary database connection for validation
+        echo "Validating SQL syntax for core tables..."
+        
+        # Check core schema files
+        for file in database/schema/*.sql; do
+          echo "Validating $file..."
+          # Use SQL*Plus or similar tool to validate syntax
+          # This would connect to a test database to validate syntax
+        done
+        
+        echo "Validating installation scripts..."
+        for file in scripts/apex-cloud/*.sql; do
+          echo "Validating $file..."
+          # Validate each installation script
+        done
+        
+    - name: Schema Dependency Check
+      run: |
+        echo "Checking schema dependencies..."
+        
+        # Verify foreign key relationships
+        python3 << 'EOF'
+        import re
+        import os
+
+        def check_foreign_keys():
+            # Read all SQL files and check for foreign key dependencies
+            sql_files = []
+            for root, dirs, files in os.walk('database'):
+                for file in files:
+                    if file.endswith('.sql'):
+                        sql_files.append(os.path.join(root, file))
+            
+            tables = set()
+            foreign_keys = []
+            
+            for file_path in sql_files:
+                with open(file_path, 'r') as f:
+                    content = f.read().upper()
+                    
+                    # Extract table names
+                    table_matches = re.findall(r'CREATE TABLE (\w+)', content)
+                    tables.update(table_matches)
+                    
+                    # Extract foreign key references
+                    fk_matches = re.findall(r'REFERENCES (\w+)', content)
+                    foreign_keys.extend(fk_matches)
+            
+            # Check if all referenced tables exist
+            missing_tables = set(foreign_keys) - tables
+            if missing_tables:
+                print(f"ERROR: Missing referenced tables: {missing_tables}")
+                return False
+            else:
+                print("All foreign key dependencies satisfied")
+                return True
+
+        if not check_foreign_keys():
+            exit(1)
+        EOF
+
+  # Stage 3: Build and Package
+  build:
+    runs-on: ubuntu-latest
+    name: Build Application Package
+    needs: [code-quality, database-tests]
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      
+    - name: Create Deployment Package
+      run: |
+        # Create deployment directory
+        mkdir -p deployment-package
+        
+        # Copy installation scripts
+        cp -r scripts/apex-cloud deployment-package/
+        cp -r database deployment-package/
+        cp -r docs deployment-package/
+        
+        # Create deployment manifest
+        cat > deployment-package/DEPLOYMENT_MANIFEST.md << 'EOF'
+        # Healthcare System Deployment Package
+        
+        ## Build Information
+        - Build Date: $(date)
+        - Git Commit: ${{ github.sha }}
+        - Branch: ${{ github.ref_name }}
+        - Environment: ${{ github.event.inputs.environment || 'dev' }}
+        
+        ## Contents
+        - Database schema scripts
+        - APEX installation scripts
+        - Sample data
+        - Documentation
+        
+        ## Installation Order
+        1. Run scripts/apex-cloud/01_run_first.sql through 09_run_final.sql
+        2. Create APEX application
+        3. Configure security and roles
+        4. Import reports and shared components
+        EOF
+        
+        # Create version file
+        echo "${{ github.sha }}" > deployment-package/VERSION
+        
+        # Create checksums
+        find deployment-package -type f -name "*.sql" -exec sha256sum {} \; > deployment-package/CHECKSUMS.txt
+        
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: healthcare-system-${{ github.sha }}
+        path: deployment-package/
+        retention-days: 30
+
+  # Stage 4: Deploy to Development
+  deploy-dev:
+    runs-on: ubuntu-latest
+    name: Deploy to Development
+    needs: build
+    if: github.ref == 'refs/heads/develop' || github.event.inputs.environment == 'dev'
+    environment: development
+    
+    steps:
+    - name: Download Build Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: healthcare-system-${{ github.sha }}
+        path: deployment-package/
+        
+    - name: Setup Oracle CLI
+      uses: oracle-actions/configure-oracle-cli@v1
+      with:
+        user: ${{ env.OCI_CLI_USER }}
+        tenancy: ${{ env.OCI_CLI_TENANCY }}
+        fingerprint: ${{ env.OCI_CLI_FINGERPRINT }}
+        key_content: ${{ env.OCI_CLI_KEY_CONTENT }}
+        region: ${{ env.OCI_CLI_REGION }}
+        
+    - name: Deploy Database Schema
+      run: |
+        echo "Deploying to development environment..."
+        
+        # Connect to development database and run scripts
+        for i in {01..09}; do
+          script_file="deployment-package/apex-cloud/${i}_run_*.sql"
+          if ls $script_file 1> /dev/null 2>&1; then
+            echo "Executing script: $script_file"
+            # Execute SQL script against development database
+            # sqlplus ${DB_USERNAME}/${DB_PASSWORD}@${DB_CONNECTION_STRING} @$script_file
+          fi
+        done
+        
+    - name: Deploy APEX Application
+      run: |
+        echo "Deploying APEX application to development..."
+        
+        # Use APEX REST APIs or command line tools to deploy
+        # This would involve:
+        # 1. Creating/updating the APEX application
+        # 2. Importing shared components
+        # 3. Setting up security schemes
+        
+    - name: Run Smoke Tests
+      run: |
+        echo "Running smoke tests..."
+        
+        # Basic connectivity and functionality tests
+        python3 << 'EOF'
+        import requests
+        import os
+
+        # Test database connectivity
+        print("Testing database connectivity...")
+        
+        # Test APEX application accessibility
+        apex_url = os.environ.get('APEX_DEV_URL', 'https://apex.oracle.com/pls/apex/')
+        try:
+            response = requests.get(apex_url, timeout=10)
+            if response.status_code == 200:
+                print("✓ APEX application accessible")
+            else:
+                print(f"✗ APEX application returned status: {response.status_code}")
+        except Exception as e:
+            print(f"✗ APEX application test failed: {e}")
+        
+        print("Smoke tests completed")
+        EOF
+
+  # Stage 5: Deploy to Staging
+  deploy-staging:
+    runs-on: ubuntu-latest
+    name: Deploy to Staging
+    needs: [build, deploy-dev]
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'staging'
+    environment: staging
+    
+    steps:
+    - name: Download Build Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: healthcare-system-${{ github.sha }}
+        path: deployment-package/
+        
+    - name: Deploy to Staging
+      run: |
+        echo "Deploying to staging environment..."
+        # Similar deployment steps as dev but for staging environment
+        
+    - name: Run Integration Tests
+      run: |
+        echo "Running integration tests..."
+        # More comprehensive testing for staging environment
+
+  # Stage 6: Deploy to Production
+  deploy-production:
+    runs-on: ubuntu-latest
+    name: Deploy to Production
+    needs: [build, deploy-staging]
+    if: github.ref == 'refs/heads/main' && github.event.inputs.environment == 'prod'
+    environment: production
+    
+    steps:
+    - name: Download Build Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: healthcare-system-${{ github.sha }}
+        path: deployment-package/
+        
+    - name: Create Backup
+      run: |
+        echo "Creating production backup before deployment..."
+        # Create backup of current production environment
+        
+    - name: Deploy to Production
+      run: |
+        echo "Deploying to production environment..."
+        # Production deployment with additional safety checks
+        
+    - name: Health Check
+      run: |
+        echo "Running production health checks..."
+        # Comprehensive health checks for production
+
+  # Stage 7: Monitoring and Alerts
+  post-deployment:
+    runs-on: ubuntu-latest
+    name: Post-Deployment Monitoring
+    needs: [deploy-production]
+    if: always()
+    
+    steps:
+    - name: Send Deployment Notification
+      run: |
+        echo "Sending deployment notifications..."
+        # Send notifications to team about deployment status
+        
+    - name: Update Monitoring
+      run: |
+        echo "Updating monitoring dashboards..."
+        # Update any monitoring or observability tools

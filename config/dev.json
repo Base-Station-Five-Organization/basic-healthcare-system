@@ -1,0 +1,73 @@
+# DevOps Configuration Files
+# Environment-specific settings for CI/CD pipeline
+
+# Development Environment
+{
+  "environment": "dev",
+  "apex_url": "https://apex.oracle.com/pls/apex",
+  "workspace": "BASESTATIONFIVE_DEV",
+  "database": {
+    "connection_string": "${DB_CONNECTION_STRING}",
+    "username": "${DB_USERNAME}",
+    "password": "${DB_PASSWORD}",
+    "schema": "healthcare_dev"
+  },
+  "application": {
+    "name": "Healthcare Management System - Development",
+    "alias": "HEALTHCARE_DEV",
+    "description": "Healthcare management system with clinical trials - Development Environment",
+    "version": "1.0.0-dev",
+    "auth_scheme": "DATABASE_ACCOUNTS",
+    "theme": "UNIVERSAL_THEME"
+  },
+  "security": {
+    "authentication": {
+      "name": "Healthcare DB Auth",
+      "type": "DATABASE_ACCOUNTS",
+      "description": "Database authentication for healthcare users"
+    },
+    "authorization": [
+      {
+        "name": "Healthcare Admin",
+        "type": "SQL_QUERY",
+        "query": "SELECT 1 FROM healthcare_users WHERE username = :APP_USER AND role = 'ADMIN'"
+      },
+      {
+        "name": "Clinical Research",
+        "type": "SQL_QUERY", 
+        "query": "SELECT 1 FROM healthcare_users WHERE username = :APP_USER AND role IN ('CLINICAL_RESEARCH', 'ADMIN')"
+      },
+      {
+        "name": "Healthcare Provider",
+        "type": "SQL_QUERY",
+        "query": "SELECT 1 FROM healthcare_users WHERE username = :APP_USER AND role IN ('PROVIDER', 'ADMIN')"
+      }
+    ]
+  },
+  "pages": [
+    {
+      "name": "Dashboard",
+      "page_number": 1,
+      "template": "Standard",
+      "authentication": "Page Requires Authentication"
+    },
+    {
+      "name": "Patient Management",
+      "page_number": 10,
+      "template": "Standard",
+      "authentication": "Page Requires Authentication"
+    },
+    {
+      "name": "Clinical Trials Dashboard",
+      "page_number": 15,
+      "template": "Standard",
+      "authentication": "Clinical Research"
+    }
+  ],
+  "components_directory": "apex/shared",
+  "deployment": {
+    "backup_required": false,
+    "run_tests": true,
+    "notify_team": true
+  }
+}
