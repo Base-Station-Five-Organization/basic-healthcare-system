@@ -8,12 +8,19 @@ Automates the deployment of Oracle APEX applications using REST APIs
 import os
 import sys
 import json
-import requests
 import argparse
 import base64
 import time
 from datetime import datetime
 from typing import Dict, Optional
+
+# Try to import requests, but handle if not available
+try:
+    import requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
+    print("⚠️ requests module not available, some functions will be limited")
 
 class APEXDeployment:
     def __init__(self, config: Dict):

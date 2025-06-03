@@ -358,6 +358,31 @@ curl -I https://apex.oracle.com/pls/apex/f?p=APPLICATION_ID
 - Regular backup validation
 - Keep documentation updated
 
+## 🔧 Troubleshooting
+
+For detailed troubleshooting information:
+
+- **Azure DevOps Issues**: See [Azure Pipeline Troubleshooting Guide](AZURE_PIPELINE_TROUBLESHOOTING.md)
+- **GitHub Actions Issues**: Check workflow logs and common GitHub Actions problems
+- **Oracle Cloud Issues**: Verify OCI CLI configuration and permissions
+- **APEX Issues**: Check workspace permissions and application imports
+
+### Quick Diagnostic Commands
+
+```bash
+# Test database connectivity
+sqlplus ${DB_USERNAME}/${DB_PASSWORD}@${DB_CONNECTION_STRING}
+
+# Validate APEX workspace
+curl -I ${APEX_URL}/pls/apex/
+
+# Check Oracle Cloud CLI
+oci iam user get --user-id ${OCI_CLI_USER}
+
+# Verify pipeline files
+find . -name "*.sql" -o -name "*.py" -o -name "*.sh" | head -10
+```
+
 ---
 
 ## 🎯 Next Steps
@@ -366,5 +391,6 @@ curl -I https://apex.oracle.com/pls/apex/f?p=APPLICATION_ID
 2. **Configure Environments**: Set up dev, staging, and production
 3. **Test Deployment**: Run a complete deployment cycle
 4. **Monitor & Optimize**: Set up monitoring and continuous improvement
+5. **Review Troubleshooting**: Familiarize yourself with common issues and solutions
 
 This DevOps implementation provides a robust, automated approach to managing your healthcare system deployment while maintaining the security and compliance requirements for healthcare applications.

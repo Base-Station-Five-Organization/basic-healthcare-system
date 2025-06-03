@@ -1,8 +1,5 @@
-# DevOps Configuration Files
-# Environment-specific settings for CI/CD pipeline
-
-# Development Environment
 {
+  "_comment": "Development Environment Configuration",
   "environment": "dev",
   "apex_url": "https://apex.oracle.com/pls/apex",
   "workspace": "BASESTATIONFIVE_DEV",

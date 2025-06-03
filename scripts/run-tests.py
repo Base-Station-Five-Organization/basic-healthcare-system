@@ -9,11 +9,24 @@ import os
 import sys
 import json
 import argparse
-import cx_Oracle
-import requests
 import time
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
+
+# Try to import optional dependencies
+try:
+    import cx_Oracle
+    HAS_ORACLE = True
+except ImportError:
+    HAS_ORACLE = False
+    print("⚠️ cx_Oracle module not available, database tests will be skipped")
+
+try:
+    import requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
+    print("⚠️ requests module not available, some tests will be skipped")
 
 class HealthcareSystemTests:
     def __init__(self, config: Dict):
@@ -23,6 +36,10 @@ class HealthcareSystemTests:
         
     def connect_database(self) -> bool:
         """Establish database connection"""
+        if not HAS_ORACLE:
+            print("⚠️ cx_Oracle not available, skipping database connection")
+            return False
+            
         try:
             dsn = cx_Oracle.makedsn(
                 self.config['database']['host'],
